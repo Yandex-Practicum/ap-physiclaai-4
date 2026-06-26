@@ -1,0 +1,6 @@
+torch
+mujoco>=3.1.0
+numpy
+tensorboard
+einops
+timm
