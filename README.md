@@ -73,7 +73,8 @@ tensorboard --logdir logs/ --bind_all --port 6006
 python3 inference.py --checkpoint logs/bc_baseline/checkpoints/best.pt --model bc --episodes 50 --seed 999
 ```
 
-Без локальной GPU — обучение в Colab по [`train_bc.ipynb`](train_bc.ipynb) (GPU runtime).
+Без локальной GPU — весь пайплайн выполняется в Colab по [`train_bc.ipynb`](train_bc.ipynb):
+[открыть в Colab](https://colab.research.google.com/github/Yandex-Practicum/ap-physiclaai-4/blob/main/train_bc.ipynb) и включить GPU-runtime (`Среда выполнения → Сменить среду выполнения → T4 GPU`).
 
 ## Структура проекта
 
