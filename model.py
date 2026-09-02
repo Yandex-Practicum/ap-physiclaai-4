@@ -6,42 +6,53 @@ import timm
 
 
 class BCPolicy(nn.Module):
-    """Визуомоторная BC-политика: RGB-изображение → вектор действия.
+    """Мультимодальная BC-политика: image/proprio → вектор действия.
 
-    CNN-энкодер (ResNet-18 из timm) извлекает фичи из кадра,
-    MLP-декодер предсказывает 8-мерный вектор действия.
+    TODO (Практика 4):
+      - поддержите конфигурации image, both и proprio через флаги;
+      - создавайте CNN только при use_image;
+      - создавайте proprio-энкодер 16→64→64 только при use_proprio;
+      - храните proprio mean/std через register_buffer;
+      - стройте decoder от суммы размеров включённых веток.
+
+    Для режима image сохраните имена модулей encoder/decoder и прежние размеры:
+    это позволяет загружать legacy checkpoint без поля obs_mode.
     """
 
-    def __init__(self, action_dim: int = 8, encoder_name: str = "resnet18"):
+    def __init__(
+        self,
+        action_dim: int = 8,
+        encoder_name: str = "resnet18",
+        proprio_dim: int = 16,
+        use_image: bool = True,
+        use_proprio: bool = False,
+        proprio_mean=None,
+        proprio_std=None,
+    ):
         super().__init__()
-        self.encoder = timm.create_model(encoder_name, pretrained=True, num_classes=0)
-        feature_dim = self.encoder.num_features
-
-        self.decoder = nn.Sequential(
-            nn.Linear(feature_dim, 256),
-            nn.ReLU(),
-            nn.Linear(256, 128),
-            nn.ReLU(),
-            nn.Linear(128, action_dim),
-            nn.Tanh(),
+        if not use_image and not use_proprio:
+            raise ValueError("Нужно включить хотя бы одну модальность.")
+        self.use_image = use_image
+        self.use_proprio = use_proprio
+        raise NotImplementedError(
+            "Реализуйте условные image/proprio ветки BCPolicy (Практика 4)."
         )
 
-    def forward(self, obs: torch.Tensor) -> torch.Tensor:
-        """obs: RGB-изображения (B,C,H,W), float32 в диапазоне [0,1]."""
-        if obs.ndim == 3:
-            obs = obs.unsqueeze(0)
-        if obs.ndim != 4 or obs.shape[1] != 3:
-            raise ValueError(
-                "Ожидалось RGB-изображение в формате (B,3,H,W), "
-                f"получена форма {tuple(obs.shape)}"
-            )
-        if obs.dtype != torch.float32:
-            raise TypeError(
-                "Ожидался тензор float32 в диапазоне [0,1], "
-                f"получен тип {obs.dtype}"
-            )
-        features = self.encoder(obs)
-        return self.decoder(features)
+    def forward(self, obs=None, proprio=None) -> torch.Tensor:
+        """Выполнить forward по включённым модальностям.
+
+        Изображение из LeRobot уже имеет формат BCHW float32 [0,1].
+
+        TODO (Практика 4):
+          1) для image-ветки проверьте BCHW-контракт и получите CNN-фичи;
+          2) для proprio-ветки проверьте форму (B,16), нормализуйте значения
+             как (proprio - mean) / (std + 1e-6) и примените MLP;
+          3) объедините доступные фичи через torch.cat(..., dim=-1);
+          4) передайте результат в decoder.
+        """
+        raise NotImplementedError(
+            "Реализуйте мультимодальный forward BCPolicy (Практика 4)."
+        )
 
 
 class RLPolicy(nn.Module):

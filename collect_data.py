@@ -42,8 +42,12 @@ class LeRobotWriter:
                 "Укажите новый путь или удалите незавершённый датасет."
             )
 
-        # TODO (Урок 4, часть 1): опишите схему observation.state, action
-        # и observation.images.front. Точные требования приведены в уроке.
+        # TODO (Практика 4, LeRobot schema): дополните схему отдельным feature
+        # observation.proprio с dtype float32 и shape (16,). Не расширяйте
+        # observation.state: это отдельное legacy-поле формы (8,).
+        #
+        # Итоговая схема должна содержать observation.state, observation.proprio,
+        # action и observation.images.front. Точные требования приведены в уроке.
         features = ...
         if features is Ellipsis:
             raise NotImplementedError(
@@ -62,6 +66,11 @@ class LeRobotWriter:
         )
 
     def add_episode(self, obs_arr, state_arr, act_arr):
+        # TODO (Практика 4, LeRobot frames):
+        #   - добавьте аргумент proprio_arr;
+        #   - проверьте, что его длина совпадает с остальными массивами;
+        #   - синхронно перебирайте proprio вместе с obs/state/action;
+        #   - положите его в frame под ключом observation.proprio.
         lengths = {len(obs_arr), len(state_arr), len(act_arr)}
         if len(lengths) != 1:
             raise ValueError(
@@ -115,10 +124,22 @@ def load_rl_policy(checkpoint_path: str, device: str) -> RLPolicy:
 
 
 def collect_episode(env, policy, device, rng_seed):
-    """Собрать один эпизод опорной политики."""
+    """Собрать один эпизод опорной политики.
+
+    TODO (Практика 4, синхронизация модальностей):
+      1) создайте proprio_list рядом с obs_list и запишите env.get_proprio()
+         сразу после reset;
+      2) после каждого env.step добавляйте новое proprio в тот же момент,
+         когда добавляется новый кадр;
+      3) обрежьте список до length, соберите proprio_arr через
+         np.stack(...).astype(np.float32) и верните его после state_arr.
+
+    Один индекс во всех массивах должен описывать одно состояние среды.
+    """
     obs = env.reset(seed=rng_seed)
     state = env.get_privileged_state()
     obs_list, state_list, action_list = [obs], [state[:8].copy()], []
+    # TODO (Практика 4): инициализируйте здесь proprio_list значением после reset.
 
     for _ in range(env.episode_length):
         state_tensor = torch.from_numpy(state).unsqueeze(0).to(device)
@@ -129,15 +150,18 @@ def collect_episode(env, policy, device, rng_seed):
         action_list.append(action)
         obs_list.append(obs)
         state_list.append(state[:8].copy())
+        # TODO (Практика 4): добавьте proprio после step синхронно с obs/state.
         if done:
             break
 
     length = len(action_list)
     obs_arr = np.stack(obs_list[:length]).astype(np.uint8)
     state_arr = np.stack(state_list[:length]).astype(np.float32)
+    # TODO (Практика 4): соберите proprio_arr формы (T, 16).
     act_arr = np.stack(action_list).astype(np.float32)
     dones = np.zeros(length, dtype=np.float32)
     dones[-1] = 1.0
+    # TODO (Практика 4): добавьте proprio_arr в возвращаемый кортеж после state_arr.
     return obs_arr, state_arr, act_arr, dones, int(success)
 
 
@@ -178,6 +202,7 @@ def main():
     try:
         while saved < args.num_episodes:
             attempts += 1
+            # TODO (Практика 4): примите proprio_arr из collect_episode.
             obs_arr, state_arr, act_arr, dones, success = collect_episode(
                 env, policy, device, rng.randint(0, 2**31)
             )
@@ -185,8 +210,11 @@ def main():
                 continue
 
             if writer is not None:
+                # TODO (Практика 4): передайте proprio_arr в LeRobotWriter.
                 writer.add_episode(obs_arr, state_arr, act_arr)
             else:
+                # NPZ оставлен только для обратной совместимости. Обучение
+                # Практики 4 читает observation.proprio из LeRobotDataset.
                 save_npz_episode(
                     args.save_dir, saved, obs_arr, act_arr, dones, success
                 )

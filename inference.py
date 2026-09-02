@@ -29,6 +29,16 @@ def parse_args():
 
 
 def load_bc_policy(checkpoint_path: str, device: str) -> BCPolicy:
+    """Восстановить BCPolicy той же модальности, что использовалась в train.
+
+    TODO (Практика 4):
+      1) прочитайте obs_mode из checkpoint; для старых checkpoint используйте
+         fallback "image";
+      2) создайте BCPolicy с соответствующими use_image/use_proprio;
+      3) для proprio-режимов передайте временные mean=zeros(16), std=ones(16):
+         реальные buffers восстановятся из model_state_dict;
+      4) затем загрузите state_dict и переведите модель в eval.
+    """
     checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=True)
     policy = BCPolicy(action_dim=8)
     policy.load_state_dict(checkpoint["model_state_dict"])
@@ -52,20 +62,22 @@ def load_rl_policy(checkpoint_path: str, device: str) -> RLPolicy:
 
 
 def run_episode_bc(env, policy, device, seed):
-    """Один эпизод closed-loop инференса BC-модели (см. Урок 6).
+    """Один эпизод closed-loop инференса мультимодальной BC-модели.
 
     API среды этого проекта (не gym-стайл):
       ``obs = env.reset(seed=seed)``            — кадр HWC uint8 [0,255];
       ``obs, success, done = env.step(action)`` — три значения.
 
-    TODO: реализуйте цикл управления на ``range(env.episode_length)``:
-      1) преобразуйте наблюдение HWC uint8 [0,255] в BCHW float32 [0,1]:
-         переставьте оси, добавьте размерность батча, разделите на 255 и
-         перенесите тензор на ``device``;
-      2) получите действие БЕЗ градиентов: ``with torch.no_grad(): action = policy(...)``,
-         приведите к numpy: ``.squeeze(0).cpu().numpy()``;
-      3) сделайте шаг среды: ``obs, success, done = env.step(action)``;
-      4) если ``done`` — верните ``(success, step + 1)``.
+    TODO (Практика 4): реализуйте цикл на ``range(env.episode_length)``:
+      1) если ``policy.use_image``, преобразуйте текущий HWC uint8 кадр
+         в BCHW float32 [0,1];
+      2) если ``policy.use_proprio``, вызовите ``env.get_proprio()`` для того же
+         текущего состояния и добавьте batch-размерность;
+      3) под ``torch.no_grad()`` вызовите ``policy(obs=..., proprio=...)``;
+      4) выполните ``env.step`` и завершите цикл при ``done``.
+
+    Не читайте LeRobot на инференсе: обе модальности приходят напрямую из env.
+    Кадр и proprio на каждом шаге должны быть синхронны.
     Если эпизод не завершился за ``env.episode_length`` шагов — верните
     ``(False, env.episode_length)``.
     """

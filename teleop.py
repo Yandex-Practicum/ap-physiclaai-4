@@ -96,6 +96,8 @@ def save_npz_episode(save_dir, obs_list, action_list, success):
 
 
 def save_lerobot_episode(writer, obs_list, state_list, action_list):
+    # TODO (Практика 4): добавьте proprio_list, соберите массив (T,16)
+    # и передайте его в LeRobotWriter между state и action.
     obs_arr = np.stack(obs_list).astype(np.uint8)
     state_arr = np.stack(state_list).astype(np.float32)
     act_arr = np.stack(action_list).astype(np.float32)
@@ -170,6 +172,7 @@ def run_teleop(env, save_dir, output_format):
 
                 obs_list = [obs]
                 state_list = [env.get_privileged_state()[:8].copy()]
+                # TODO (Практика 4): создайте синхронный proprio_list после reset.
                 action_list = []
                 controller.save_requested = False
                 controller.cancel_requested = False
@@ -183,6 +186,7 @@ def run_teleop(env, save_dir, output_format):
                     obs, success, done = env.step(action)
                     obs_list.append(obs)
                     state_list.append(env.get_privileged_state()[:8].copy())
+                    # TODO (Практика 4): добавьте proprio после step в тот же момент.
 
                     mj_data.qpos[:] = env.data.qpos[:]
                     mj_data.qvel[:] = env.data.qvel[:]

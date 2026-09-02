@@ -14,6 +14,7 @@ SCENE_XML = os.path.join(os.path.dirname(__file__), "assets", "scene.xml")
 NUM_ARM_JOINTS = 7
 NUM_FINGERS = 2
 ACTION_DIM = NUM_ARM_JOINTS + 1  # 7 joints + 1 gripper command
+PROPRIO_DIM = NUM_ARM_JOINTS + NUM_FINGERS + NUM_ARM_JOINTS  # 9 qpos + 7 qvel
 OBS_SIZE = 84
 EPISODE_LENGTH = 600
 SUCCESS_DIST = 0.05
@@ -106,6 +107,22 @@ class PandaPickCubeEnv:
     def _get_obs(self) -> np.ndarray:
         self.renderer.update_scene(self.data, camera=self._cam_id)
         return self.renderer.render().copy()
+
+    def get_proprio(self) -> np.ndarray:
+        """Вернуть доступную роботу проприоцепцию с формой (16,).
+
+        TODO (Практика 4, сбор мультимодальных наблюдений):
+          1) скопируйте позиции 7 суставов руки и 2 пальцев из data.qpos;
+          2) скопируйте скорости 7 суставов руки из data.qvel;
+          3) объедините их в порядке [joint_pos, joint_vel];
+          4) верните непрерывный массив np.float32 формы (PROPRIO_DIM,).
+
+        Координаты куба, цели и камеры сюда не входят: это privileged state,
+        недоступный BC-политике во время реального инференса.
+        """
+        raise NotImplementedError(
+            "Реализуйте get_proprio — 9 qpos + 7 qvel (Практика 4)."
+        )
 
     def get_privileged_state(self) -> np.ndarray:
         joint_pos = self.data.qpos[:NUM_ARM_JOINTS + NUM_FINGERS].copy()

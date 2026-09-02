@@ -20,8 +20,9 @@ from collect_data import LeRobotWriter
 def _fake_episode(T=6):
     obs = (np.random.rand(T, 84, 84, 3) * 255).astype(np.uint8)
     state = np.random.rand(T, 8).astype(np.float32)
+    proprio = np.random.rand(T, 16).astype(np.float32)
     act = np.random.rand(T, 8).astype(np.float32)
-    return obs, state, act
+    return obs, state, proprio, act
 
 
 def test_writer_produces_loadable_dataset():
@@ -29,10 +30,10 @@ def test_writer_produces_loadable_dataset():
     save_dir = os.path.join(base, "ds")  # не должна существовать заранее
 
     writer = LeRobotWriter(save_dir)
-    obs, state, act = _fake_episode(T=6)
-    writer.add_episode(obs, state, act)
-    obs2, state2, act2 = _fake_episode(T=4)
-    writer.add_episode(obs2, state2, act2)
+    obs, state, proprio, act = _fake_episode(T=6)
+    writer.add_episode(obs, state, proprio, act)
+    obs2, state2, proprio2, act2 = _fake_episode(T=4)
+    writer.add_episode(obs2, state2, proprio2, act2)
     writer.finalize()
 
     # 1. Структура папок LeRobotDataset v3.0
@@ -59,6 +60,8 @@ def test_writer_produces_loadable_dataset():
     assert sample["action"].dtype == torch.float32
     assert sample["observation.state"].shape == (8,)
     assert sample["observation.state"].dtype == torch.float32
+    assert sample["observation.proprio"].shape == (16,)
+    assert sample["observation.proprio"].dtype == torch.float32
     # изображение декодируется из видео как (C, H, W)
     assert tuple(sample["observation.images.front"].shape) == (3, 84, 84)
     assert sample["observation.images.front"].dtype == torch.float32
@@ -71,15 +74,17 @@ def test_training_dataset_reads_lerobot():
     save_dir = os.path.join(base, "ds")
 
     writer = LeRobotWriter(save_dir)
-    obs, state, act = _fake_episode(T=4)
-    writer.add_episode(obs, state, act)
+    obs, state, proprio, act = _fake_episode(T=4)
+    writer.add_episode(obs, state, proprio, act)
     writer.finalize()
 
     from train_bc import EpisodeDataset
 
-    dataset = EpisodeDataset(save_dir)
-    image, action = dataset[0]
-    assert tuple(image.shape) == (3, 84, 84)
-    assert tuple(action.shape) == (8,)
-    assert image.dtype == torch.float32
-    assert action.dtype == torch.float32
+    dataset = EpisodeDataset(save_dir, obs_mode="both")
+    sample = dataset[0]
+    assert tuple(sample["image"].shape) == (3, 84, 84)
+    assert tuple(sample["proprio"].shape) == (16,)
+    assert tuple(sample["action"].shape) == (8,)
+    assert sample["image"].dtype == torch.float32
+    assert sample["proprio"].dtype == torch.float32
+    assert sample["action"].dtype == torch.float32
