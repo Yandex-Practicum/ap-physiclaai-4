@@ -35,9 +35,11 @@ def load_bc_policy(checkpoint_path: str, device: str) -> BCPolicy:
       1) прочитайте obs_mode из checkpoint; для старых checkpoint используйте
          fallback "image";
       2) создайте BCPolicy с соответствующими use_image/use_proprio;
-      3) для proprio-режимов передайте временные mean=zeros(16), std=ones(16):
+      3) восстановите proprio_encoder_type; для старых checkpoint используйте
+         fallback "mlp";
+      4) для proprio-режимов передайте временные mean=zeros(16), std=ones(16):
          реальные buffers восстановятся из model_state_dict;
-      4) затем загрузите state_dict и переведите модель в eval.
+      5) затем загрузите state_dict и переведите модель в eval.
     """
     checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=True)
     policy = BCPolicy(action_dim=8)

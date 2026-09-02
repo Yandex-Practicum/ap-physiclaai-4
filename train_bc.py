@@ -62,6 +62,12 @@ def parse_args():
         default="image",
         help="Наблюдения BC-политики: image, both или proprio",
     )
+    parser.add_argument(
+        "--proprio_encoder_type",
+        choices=["mlp", "identity"],
+        default="mlp",
+        help="Ablation proprio: MLP или прямая конкатенация после нормализации",
+    )
     return parser.parse_args()
 
 
@@ -147,7 +153,8 @@ def main():
 
     # TODO (Практика 4):
     #   - если режим использует proprio, вычислите mean/std только по train_dataset;
-    #   - создайте BCPolicy с соответствующими use_image/use_proprio и статистиками.
+    #   - создайте BCPolicy с соответствующими use_image/use_proprio,
+    #     статистиками и args.proprio_encoder_type.
 
     pin = (device == "cuda")
     train_loader = DataLoader(
@@ -206,7 +213,8 @@ def main():
                 "optimizer_state_dict": optimizer.state_dict(),
                 "eval_loss": eval_loss,
                 "train_loss": train_loss,
-                # TODO (Практика 4): сохраните obs_mode в каждом checkpoint.
+                # TODO (Практика 4): сохраните obs_mode и proprio_encoder_type
+                # в каждом checkpoint.
             }, os.path.join(ckpt_dir, "best.pt"))
 
         elapsed = time.time() - t0
@@ -220,7 +228,8 @@ def main():
         "optimizer_state_dict": optimizer.state_dict(),
         "eval_loss": eval_loss,
         "train_loss": train_loss,
-        # TODO (Практика 4): сохраните obs_mode в каждом checkpoint.
+        # TODO (Практика 4): сохраните obs_mode и proprio_encoder_type
+        # в каждом checkpoint.
     }, os.path.join(ckpt_dir, "last.pt"))
 
     writer.close()

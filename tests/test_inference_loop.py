@@ -89,10 +89,18 @@ def test_timeout_returns_false_and_inference_uses_no_grad():
 
 
 class FakeLoadedPolicy:
-    def __init__(self, action_dim, use_image, use_proprio, **kwargs):
+    def __init__(
+        self,
+        action_dim,
+        use_image,
+        use_proprio,
+        proprio_encoder_type="mlp",
+        **kwargs,
+    ):
         self.action_dim = action_dim
         self.use_image = use_image
         self.use_proprio = use_proprio
+        self.proprio_encoder_type = proprio_encoder_type
 
     def load_state_dict(self, state_dict):
         self.state_dict_value = state_dict
@@ -111,6 +119,7 @@ def test_load_bc_policy_restores_obs_mode(monkeypatch):
         "load",
         lambda *args, **kwargs: {
             "obs_mode": "both",
+            "proprio_encoder_type": "identity",
             "model_state_dict": {"weight": torch.tensor(1.0)},
         },
     )
@@ -119,6 +128,7 @@ def test_load_bc_policy_restores_obs_mode(monkeypatch):
 
     assert policy.use_image is True
     assert policy.use_proprio is True
+    assert policy.proprio_encoder_type == "identity"
 
 
 def test_load_bc_policy_defaults_old_checkpoint_to_image(monkeypatch):
@@ -133,3 +143,4 @@ def test_load_bc_policy_defaults_old_checkpoint_to_image(monkeypatch):
 
     assert policy.use_image is True
     assert policy.use_proprio is False
+    assert policy.proprio_encoder_type == "mlp"

@@ -60,8 +60,43 @@ def test_both_mode_accepts_image_and_proprio():
         proprio=torch.zeros(2, 16),
     )
     assert action.shape == (2, 8)
+    assert policy.decoder[0].in_features == 512 + 64
+
+
+def test_both_identity_ablation_concatenates_normalized_proprio_directly():
+    mean = torch.arange(16, dtype=torch.float32)
+    std = torch.full((16,), 2.0)
+    policy = BCPolicy(
+        use_image=True,
+        use_proprio=True,
+        proprio_mean=mean,
+        proprio_std=std,
+        proprio_encoder_type="identity",
+    )
+    captured = {}
+
+    def capture_decoder_input(_module, args):
+        captured["features"] = args[0].detach().clone()
+
+    policy.decoder.register_forward_pre_hook(capture_decoder_input)
+    proprio = mean.unsqueeze(0).repeat(2, 1) + 2.0
+    action = policy(
+        obs=torch.zeros(2, 3, 84, 84),
+        proprio=proprio,
+    )
+
+    assert action.shape == (2, 8)
+    assert policy.decoder[0].in_features == 512 + 16
+    torch.testing.assert_close(captured["features"][:, :512], torch.ones(2, 512))
+    expected_proprio = (proprio - mean) / (std + 1e-6)
+    torch.testing.assert_close(captured["features"][:, 512:], expected_proprio)
 
 
 def test_rejects_configuration_without_modalities():
     with pytest.raises(ValueError, match="модальност"):
         BCPolicy(use_image=False, use_proprio=False)
+
+
+def test_rejects_unknown_proprio_encoder_type():
+    with pytest.raises(ValueError, match="proprio_encoder_type"):
+        BCPolicy(proprio_encoder_type="unknown")

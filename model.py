@@ -11,7 +11,8 @@ class BCPolicy(nn.Module):
     TODO (Практика 4):
       - поддержите конфигурации image, both и proprio через флаги;
       - создавайте CNN только при use_image;
-      - создавайте proprio-энкодер 16→64→64 только при use_proprio;
+      - для proprio поддержите ablation ``mlp`` (16→64→64) и ``identity``
+        (нормализованный вектор без обучаемого энкодера);
       - храните proprio mean/std через register_buffer;
       - стройте decoder от суммы размеров включённых веток.
 
@@ -28,12 +29,16 @@ class BCPolicy(nn.Module):
         use_proprio: bool = False,
         proprio_mean=None,
         proprio_std=None,
+        proprio_encoder_type: str = "mlp",
     ):
         super().__init__()
         if not use_image and not use_proprio:
             raise ValueError("Нужно включить хотя бы одну модальность.")
+        if proprio_encoder_type not in {"mlp", "identity"}:
+            raise ValueError("proprio_encoder_type должен быть mlp или identity.")
         self.use_image = use_image
         self.use_proprio = use_proprio
+        self.proprio_encoder_type = proprio_encoder_type
         raise NotImplementedError(
             "Реализуйте условные image/proprio ветки BCPolicy (Практика 4)."
         )
@@ -45,10 +50,12 @@ class BCPolicy(nn.Module):
 
         TODO (Практика 4):
           1) для image-ветки проверьте BCHW-контракт и получите CNN-фичи;
-          2) для proprio-ветки проверьте форму (B,16), нормализуйте значения
-             как (proprio - mean) / (std + 1e-6) и примените MLP;
-          3) объедините доступные фичи через torch.cat(..., dim=-1);
-          4) передайте результат в decoder.
+          2) для proprio-ветки проверьте форму (B,16) и нормализуйте значения
+             как (proprio - mean) / (std + 1e-6);
+          3) в ablation ``mlp`` примените MLP 16→64→64, а в ``identity``
+             передайте нормализованные 16 признаков напрямую;
+          4) объедините доступные фичи через torch.cat(..., dim=-1);
+          5) передайте результат в decoder.
         """
         raise NotImplementedError(
             "Реализуйте мультимодальный forward BCPolicy (Практика 4)."
