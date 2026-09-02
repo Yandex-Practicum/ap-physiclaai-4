@@ -1,40 +1,51 @@
-"""BC-модель (визуомоторная: вход — изображение) и RL-политика."""
+"""BC-модель (CNN + MLP) и RL-политика (MLP) для PandaPickCube."""
 
 import torch
 import torch.nn as nn
 import timm
-from einops import rearrange
 
 
 class BCPolicy(nn.Module):
-    """Визуомоторная BC-политика: изображение → вектор действия.
+    """Визуомоторная BC-политика: RGB-изображение → вектор действия.
 
-    Изображение проходит через CNN-энкодер (ResNet-18), затем MLP-декодер
-    предсказывает 8-мерное действие.
+    CNN-энкодер (ResNet-18 из timm) извлекает фичи из кадра,
+    MLP-декодер предсказывает 8-мерный вектор действия.
     """
 
     def __init__(self, action_dim: int = 8, encoder_name: str = "resnet18"):
         super().__init__()
         self.encoder = timm.create_model(encoder_name, pretrained=True, num_classes=0)
-        feat_dim = self.encoder.num_features  # 512 для resnet18
+        feature_dim = self.encoder.num_features
 
         self.decoder = nn.Sequential(
-            nn.Linear(feat_dim, 256), nn.ReLU(),
-            nn.Linear(256, 128), nn.ReLU(),
-            nn.Linear(128, action_dim), nn.Tanh(),
+            nn.Linear(feature_dim, 256),
+            nn.ReLU(),
+            nn.Linear(256, 128),
+            nn.ReLU(),
+            nn.Linear(128, action_dim),
+            nn.Tanh(),
         )
 
     def forward(self, obs: torch.Tensor) -> torch.Tensor:
-        if obs.dtype == torch.uint8:
-            obs = obs.float() / 255.0
+        """obs: RGB-изображения (B,C,H,W), float32 в диапазоне [0,1]."""
         if obs.ndim == 3:
             obs = obs.unsqueeze(0)
-        x = rearrange(obs, "b h w c -> b c h w")
-        return self.decoder(self.encoder(x))
+        if obs.ndim != 4 or obs.shape[1] != 3:
+            raise ValueError(
+                "Ожидалось RGB-изображение в формате (B,3,H,W), "
+                f"получена форма {tuple(obs.shape)}"
+            )
+        if obs.dtype != torch.float32:
+            raise TypeError(
+                "Ожидался тензор float32 в диапазоне [0,1], "
+                f"получен тип {obs.dtype}"
+            )
+        features = self.encoder(obs)
+        return self.decoder(features)
 
 
 class RLPolicy(nn.Module):
-    """MLP-политика для privileged state → action (опорный эксперт)."""
+    """MLP-политика для privileged state → action."""
 
     def __init__(self, state_dim: int = 29, action_dim: int = 8,
                  hidden_dims: tuple = (512, 256, 128)):
