@@ -146,10 +146,12 @@ def main():
     train_loader = DataLoader(
         train_dataset, batch_size=args.batch_size, shuffle=True,
         num_workers=args.num_workers, pin_memory=pin, drop_last=True,
+        multiprocessing_context="spawn" if args.num_workers > 0 else None,
     )
     eval_loader = DataLoader(
         eval_dataset, batch_size=args.batch_size, shuffle=False,
         num_workers=args.num_workers, pin_memory=pin,
+        multiprocessing_context="spawn" if args.num_workers > 0 else None,
     )
 
     model = BCPolicy(
