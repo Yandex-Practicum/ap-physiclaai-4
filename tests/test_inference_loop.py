@@ -1,6 +1,7 @@
 """Контракты closed-loop инференса для image/both/proprio режимов."""
 
 import numpy as np
+import pytest
 import torch
 import torch.nn as nn
 
@@ -55,7 +56,9 @@ def test_image_mode_prepares_bchw_float_image():
 
     assert bool(success) is True
     assert steps == 2
-    assert policy.calls == [(0.0, None), (1.0 / 255.0, None)]
+    assert policy.calls[0] == (0.0, None)
+    assert policy.calls[1][0] == pytest.approx(1.0 / 255.0)
+    assert policy.calls[1][1] is None
 
 
 def test_both_mode_reads_synchronized_modalities():

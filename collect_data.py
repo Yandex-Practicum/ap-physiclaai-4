@@ -42,17 +42,34 @@ class LeRobotWriter:
                 "Укажите новый путь или удалите незавершённый датасет."
             )
 
-        # TODO (Практика 4, LeRobot schema): дополните схему отдельным feature
-        # observation.proprio с dtype float32 и shape (16,). Не расширяйте
-        # observation.state: это отдельное legacy-поле формы (8,).
-        #
-        # Итоговая схема должна содержать observation.state, observation.proprio,
-        # action и observation.images.front. Точные требования приведены в уроке.
-        features = ...
-        if features is Ellipsis:
-            raise NotImplementedError(
-                "Заполните TODO features в LeRobotWriter (см. Урок 4)."
-            )
+        joint_names = [f"joint_{i}" for i in range(1, 8)] + ["gripper"]
+        proprio_names = (
+            [f"joint_{i}_pos" for i in range(1, 8)]
+            + ["left_finger_pos", "right_finger_pos"]
+            + [f"joint_{i}_vel" for i in range(1, 8)]
+        )
+        features = {
+            "observation.state": {
+                "dtype": "float32",
+                "shape": (8,),
+                "names": joint_names,
+            },
+            "observation.proprio": {
+                "dtype": "float32",
+                "shape": (16,),
+                "names": proprio_names,
+            },
+            "action": {
+                "dtype": "float32",
+                "shape": (8,),
+                "names": joint_names,
+            },
+            "observation.images.front": {
+                "dtype": "video",
+                "shape": (84, 84, 3),
+                "names": ["height", "width", "channels"],
+            },
+        }
 
         self.dataset = LeRobotDataset.create(
             repo_id=REPO_ID,
@@ -65,27 +82,25 @@ class LeRobotWriter:
             vcodec="h264",
         )
 
-    def add_episode(self, obs_arr, state_arr, act_arr):
-        # TODO (Практика 4, LeRobot frames):
-        #   - добавьте аргумент proprio_arr;
-        #   - проверьте, что его длина совпадает с остальными массивами;
-        #   - синхронно перебирайте proprio вместе с obs/state/action;
-        #   - положите его в frame под ключом observation.proprio.
-        lengths = {len(obs_arr), len(state_arr), len(act_arr)}
+    def add_episode(self, obs_arr, state_arr, proprio_arr, act_arr):
+        lengths = {len(obs_arr), len(state_arr), len(proprio_arr), len(act_arr)}
         if len(lengths) != 1:
             raise ValueError(
-                "Длины observation, state и action должны совпадать: "
-                f"{len(obs_arr)}, {len(state_arr)}, {len(act_arr)}"
+                "Длины observation, state, proprio и action должны совпадать: "
+                f"{len(obs_arr)}, {len(state_arr)}, {len(proprio_arr)}, "
+                f"{len(act_arr)}"
             )
 
-        for obs, state, action in zip(obs_arr, state_arr, act_arr, strict=True):
-            # TODO (Урок 4, часть 2): соберите словарь frame с состоянием,
-            # действием, изображением и текстовым описанием задачи.
-            frame = ...
-            if frame is Ellipsis:
-                raise NotImplementedError(
-                    "Заполните TODO frame в LeRobotWriter (см. Урок 4)."
-                )
+        for obs, state, proprio, action in zip(
+            obs_arr, state_arr, proprio_arr, act_arr, strict=True
+        ):
+            frame = {
+                "observation.state": np.asarray(state, dtype=np.float32),
+                "observation.proprio": np.asarray(proprio, dtype=np.float32),
+                "action": np.asarray(action, dtype=np.float32),
+                "observation.images.front": np.asarray(obs, dtype=np.uint8),
+                "task": "Pick up the cube and place it in the target",
+            }
             self.dataset.add_frame(frame)
 
         self.dataset.save_episode()
@@ -124,22 +139,11 @@ def load_rl_policy(checkpoint_path: str, device: str) -> RLPolicy:
 
 
 def collect_episode(env, policy, device, rng_seed):
-    """Собрать один эпизод опорной политики.
-
-    TODO (Практика 4, синхронизация модальностей):
-      1) создайте proprio_list рядом с obs_list и запишите env.get_proprio()
-         сразу после reset;
-      2) после каждого env.step добавляйте новое proprio в тот же момент,
-         когда добавляется новый кадр;
-      3) обрежьте список до length, соберите proprio_arr через
-         np.stack(...).astype(np.float32) и верните его после state_arr.
-
-    Один индекс во всех массивах должен описывать одно состояние среды.
-    """
+    """Собрать один синхронизированный эпизод опорной политики."""
     obs = env.reset(seed=rng_seed)
     state = env.get_privileged_state()
     obs_list, state_list, action_list = [obs], [state[:8].copy()], []
-    # TODO (Практика 4): инициализируйте здесь proprio_list значением после reset.
+    proprio_list = [env.get_proprio()]
 
     for _ in range(env.episode_length):
         state_tensor = torch.from_numpy(state).unsqueeze(0).to(device)
@@ -150,19 +154,18 @@ def collect_episode(env, policy, device, rng_seed):
         action_list.append(action)
         obs_list.append(obs)
         state_list.append(state[:8].copy())
-        # TODO (Практика 4): добавьте proprio после step синхронно с obs/state.
+        proprio_list.append(env.get_proprio())
         if done:
             break
 
     length = len(action_list)
     obs_arr = np.stack(obs_list[:length]).astype(np.uint8)
     state_arr = np.stack(state_list[:length]).astype(np.float32)
-    # TODO (Практика 4): соберите proprio_arr формы (T, 16).
+    proprio_arr = np.stack(proprio_list[:length]).astype(np.float32)
     act_arr = np.stack(action_list).astype(np.float32)
     dones = np.zeros(length, dtype=np.float32)
     dones[-1] = 1.0
-    # TODO (Практика 4): добавьте proprio_arr в возвращаемый кортеж после state_arr.
-    return obs_arr, state_arr, act_arr, dones, int(success)
+    return obs_arr, state_arr, proprio_arr, act_arr, dones, int(success)
 
 
 def save_npz_episode(save_dir, episode_index, obs_arr, act_arr, dones, success):
@@ -202,16 +205,14 @@ def main():
     try:
         while saved < args.num_episodes:
             attempts += 1
-            # TODO (Практика 4): примите proprio_arr из collect_episode.
-            obs_arr, state_arr, act_arr, dones, success = collect_episode(
+            obs_arr, state_arr, proprio_arr, act_arr, dones, success = collect_episode(
                 env, policy, device, rng.randint(0, 2**31)
             )
             if args.only_success and not success:
                 continue
 
             if writer is not None:
-                # TODO (Практика 4): передайте proprio_arr в LeRobotWriter.
-                writer.add_episode(obs_arr, state_arr, act_arr)
+                writer.add_episode(obs_arr, state_arr, proprio_arr, act_arr)
             else:
                 # NPZ оставлен только для обратной совместимости. Обучение
                 # Практики 4 читает observation.proprio из LeRobotDataset.

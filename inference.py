@@ -29,20 +29,19 @@ def parse_args():
 
 
 def load_bc_policy(checkpoint_path: str, device: str) -> BCPolicy:
-    """Восстановить BCPolicy той же модальности, что использовалась в train.
-
-    TODO (Практика 4):
-      1) прочитайте obs_mode из checkpoint; для старых checkpoint используйте
-         fallback "image";
-      2) создайте BCPolicy с соответствующими use_image/use_proprio;
-      3) восстановите proprio_encoder_type; для старых checkpoint используйте
-         fallback "mlp";
-      4) для proprio-режимов передайте временные mean=zeros(16), std=ones(16):
-         реальные buffers восстановятся из model_state_dict;
-      5) затем загрузите state_dict и переведите модель в eval.
-    """
+    """Восстановить BCPolicy той же модальности, что использовалась в train."""
     checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=True)
-    policy = BCPolicy(action_dim=8)
+    obs_mode = checkpoint.get("obs_mode", "image")
+    if obs_mode not in {"image", "both", "proprio"}:
+        raise ValueError(f"Неизвестный obs_mode в checkpoint: {obs_mode}")
+    policy = BCPolicy(
+        action_dim=8,
+        use_image=obs_mode in {"image", "both"},
+        use_proprio=obs_mode in {"proprio", "both"},
+        proprio_mean=torch.zeros(16),
+        proprio_std=torch.ones(16),
+        proprio_encoder_type=checkpoint.get("proprio_encoder_type", "mlp"),
+    )
     policy.load_state_dict(checkpoint["model_state_dict"])
     policy.to(device)
     policy.eval()
@@ -64,28 +63,34 @@ def load_rl_policy(checkpoint_path: str, device: str) -> RLPolicy:
 
 
 def run_episode_bc(env, policy, device, seed):
-    """Один эпизод closed-loop инференса мультимодальной BC-модели.
+    """Выполнить closed-loop эпизод мультимодальной BC-модели."""
+    obs = env.reset(seed=seed)
 
-    API среды этого проекта (не gym-стайл):
-      ``obs = env.reset(seed=seed)``            — кадр HWC uint8 [0,255];
-      ``obs, success, done = env.step(action)`` — три значения.
+    for step in range(env.episode_length):
+        obs_tensor = None
+        proprio_tensor = None
+        if policy.use_image:
+            obs_tensor = (
+                torch.from_numpy(obs)
+                .permute(2, 0, 1)
+                .unsqueeze(0)
+                .to(device=device, dtype=torch.float32)
+                / 255.0
+            )
+        if policy.use_proprio:
+            proprio_tensor = (
+                torch.from_numpy(env.get_proprio()).unsqueeze(0).to(device)
+            )
 
-    TODO (Практика 4): реализуйте цикл на ``range(env.episode_length)``:
-      1) если ``policy.use_image``, преобразуйте текущий HWC uint8 кадр
-         в BCHW float32 [0,1];
-      2) если ``policy.use_proprio``, вызовите ``env.get_proprio()`` для того же
-         текущего состояния и добавьте batch-размерность;
-      3) под ``torch.no_grad()`` вызовите ``policy(obs=..., proprio=...)``;
-      4) выполните ``env.step`` и завершите цикл при ``done``.
+        with torch.no_grad():
+            action = policy(
+                obs=obs_tensor, proprio=proprio_tensor
+            ).squeeze(0).cpu().numpy()
+        obs, success, done = env.step(action)
+        if done:
+            return success, step + 1
 
-    Не читайте LeRobot на инференсе: обе модальности приходят напрямую из env.
-    Кадр и proprio на каждом шаге должны быть синхронны.
-    Если эпизод не завершился за ``env.episode_length`` шагов — верните
-    ``(False, env.episode_length)``.
-    """
-    raise NotImplementedError(
-        "Реализуйте цикл closed-loop инференса BC-модели (см. Урок 6)."
-    )
+    return False, env.episode_length
 
 
 def run_episode_rl(env, policy, device, seed):

@@ -25,22 +25,16 @@ def train_step(
     action_batch,
     proprio_batch=None,
 ):
-    """Один шаг обучения BC (см. Урок 5).
-
-    TODO: реализуйте классический цикл PyTorch из 5 шагов:
-      1) обнулите градиенты (``optimizer.zero_grad``);
-      2) прямой проход: передайте в модель доступные ``obs_batch`` и
-         ``proprio_batch`` именованными аргументами;
-      3) посчитайте MSE-loss между ``pred`` и ``action_batch``;
-      4) обратный проход (``loss.backward``);
-      5) шаг оптимизатора (``optimizer.step``).
-    Верните значение loss как число (``loss.item()``).
-    """
-    # TODO (Практика 4): proprio_batch может быть None в image-only режиме,
-    # а obs_batch — в proprio-only; не подставляйте отсутствующую модальность.
-    raise NotImplementedError(
-        "Реализуйте train_step — один шаг обучения BC (см. Урок 5)."
-    )
+    """Выполнить один шаг обучения BC и вернуть MSE-loss."""
+    optimizer.zero_grad()
+    if proprio_batch is None:
+        pred = model(obs_batch)
+    else:
+        pred = model(obs=obs_batch, proprio=proprio_batch)
+    loss = nn.functional.mse_loss(pred, action_batch)
+    loss.backward()
+    optimizer.step()
+    return loss.item()
 
 
 def parse_args():
@@ -72,18 +66,13 @@ def parse_args():
 
 
 class EpisodeDataset(Dataset):
-    """Ленивая обёртка над LeRobotDataset.
-
-    TODO (Практика 4):
-      - примите obs_mode и проверьте одно из image/both/proprio;
-      - читайте proprio только из sample["observation.proprio"];
-      - возвращайте словарь с action и только нужными ключами image/proprio;
-      - не ищите NPZ-файлы: источником остаётся LeRobotDataset v3.
-    """
+    """Ленивая обёртка над LeRobotDataset для выбранных модальностей."""
 
     def __init__(self, data_dir: str, obs_mode: str = "image"):
         from lerobot.datasets.lerobot_dataset import LeRobotDataset
 
+        if obs_mode not in {"image", "both", "proprio"}:
+            raise ValueError("obs_mode должен быть image, both или proprio.")
         self.obs_mode = obs_mode
         self.dataset = LeRobotDataset(
             repo_id="local/practice4",
@@ -100,43 +89,39 @@ class EpisodeDataset(Dataset):
 
     def __getitem__(self, idx):
         sample = self.dataset[idx]
-        if self.obs_mode != "image":
-            raise NotImplementedError(
-                "Добавьте observation.proprio в EpisodeDataset (Практика 4)."
-            )
-        obs = sample["observation.images.front"].to(torch.float32)
-        action = sample["action"].to(torch.float32)
-        # TODO (Практика 4): добавьте observation.proprio для both/proprio.
-        return {"image": obs, "action": action}
+        result = {"action": sample["action"].to(torch.float32)}
+        if self.obs_mode in {"image", "both"}:
+            result["image"] = sample["observation.images.front"].to(torch.float32)
+        if self.obs_mode in {"proprio", "both"}:
+            result["proprio"] = sample["observation.proprio"].to(torch.float32)
+        return result
 
 
 def compute_proprio_stats(dataset):
-    """Посчитать покомпонентные mean/std proprio только по train-датасету.
-
-    TODO (Практика 4): объедините sample["proprio"] по всем кадрам,
-    верните два float32-тензора формы (16,). Используйте population std
-    (unbiased=False), чтобы результат не зависел от размера датасета.
-    """
-    raise NotImplementedError(
-        "Реализуйте compute_proprio_stats по train LeRobotDataset."
-    )
+    """Посчитать population mean/std proprio только по train-датасету."""
+    values = torch.stack([dataset[i]["proprio"] for i in range(len(dataset))])
+    return values.mean(dim=0).to(torch.float32), values.std(
+        dim=0, unbiased=False
+    ).to(torch.float32)
 
 
 def evaluate(model, eval_loader, criterion, device):
-    """Посчитать eval loss для именованных мультимодальных batch.
-
-    TODO (Практика 4): извлекайте image/proprio согласно флагам модели,
-    переносите только доступные тензоры на device и вызывайте модель с тем же
-    контрактом, что используется в train_step.
-    """
+    """Посчитать eval loss для именованных мультимодальных batch."""
     model.eval()
     total_loss = 0.0
     n_batches = 0
     with torch.no_grad():
         for batch in eval_loader:
-            raise NotImplementedError(
-                "Адаптируйте evaluate к image/both/proprio batch (Практика 4)."
-            )
+            obs = batch.get("image")
+            proprio = batch.get("proprio")
+            if obs is not None:
+                obs = obs.to(device)
+            if proprio is not None:
+                proprio = proprio.to(device)
+            actions = batch["action"].to(device)
+            pred = model(obs=obs, proprio=proprio)
+            total_loss += criterion(pred, actions).item()
+            n_batches += 1
     return total_loss / max(n_batches, 1)
 
 
@@ -151,10 +136,11 @@ def main():
     train_dataset = EpisodeDataset(args.train_dir, obs_mode=args.obs_mode)
     eval_dataset = EpisodeDataset(args.eval_dir, obs_mode=args.obs_mode)
 
-    # TODO (Практика 4):
-    #   - если режим использует proprio, вычислите mean/std только по train_dataset;
-    #   - создайте BCPolicy с соответствующими use_image/use_proprio,
-    #     статистиками и args.proprio_encoder_type.
+    use_image = args.obs_mode in {"image", "both"}
+    use_proprio = args.obs_mode in {"proprio", "both"}
+    proprio_mean = proprio_std = None
+    if use_proprio:
+        proprio_mean, proprio_std = compute_proprio_stats(train_dataset)
 
     pin = (device == "cuda")
     train_loader = DataLoader(
@@ -166,7 +152,14 @@ def main():
         num_workers=args.num_workers, pin_memory=pin,
     )
 
-    model = BCPolicy(action_dim=8).to(device)
+    model = BCPolicy(
+        action_dim=8,
+        use_image=use_image,
+        use_proprio=use_proprio,
+        proprio_mean=proprio_mean,
+        proprio_std=proprio_std,
+        proprio_encoder_type=args.proprio_encoder_type,
+    ).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
     criterion = nn.MSELoss()
 
@@ -190,11 +183,14 @@ def main():
         train_loss_sum = 0.0
         n_batches = 0
         for batch in train_loader:
-            # TODO (Практика 4): извлеките включённые модальности из batch,
-            # перенесите их на device и передайте в train_step/model.
-            obs = batch["image"].to(device)
+            obs = batch.get("image")
+            proprio = batch.get("proprio")
+            if obs is not None:
+                obs = obs.to(device)
+            if proprio is not None:
+                proprio = proprio.to(device)
             actions = batch["action"].to(device)
-            loss_value = train_step(model, optimizer, obs, actions)
+            loss_value = train_step(model, optimizer, obs, actions, proprio)
             train_loss_sum += loss_value
             n_batches += 1
 
@@ -213,8 +209,8 @@ def main():
                 "optimizer_state_dict": optimizer.state_dict(),
                 "eval_loss": eval_loss,
                 "train_loss": train_loss,
-                # TODO (Практика 4): сохраните obs_mode и proprio_encoder_type
-                # в каждом checkpoint.
+                "obs_mode": args.obs_mode,
+                "proprio_encoder_type": args.proprio_encoder_type,
             }, os.path.join(ckpt_dir, "best.pt"))
 
         elapsed = time.time() - t0
@@ -228,8 +224,8 @@ def main():
         "optimizer_state_dict": optimizer.state_dict(),
         "eval_loss": eval_loss,
         "train_loss": train_loss,
-        # TODO (Практика 4): сохраните obs_mode и proprio_encoder_type
-        # в каждом checkpoint.
+        "obs_mode": args.obs_mode,
+        "proprio_encoder_type": args.proprio_encoder_type,
     }, os.path.join(ckpt_dir, "last.pt"))
 
     writer.close()

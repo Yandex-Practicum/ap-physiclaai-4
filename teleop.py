@@ -95,13 +95,12 @@ def save_npz_episode(save_dir, obs_list, action_list, success):
     print(f"Эпизод сохранён: {filename} ({len(act_arr)} шагов)")
 
 
-def save_lerobot_episode(writer, obs_list, state_list, action_list):
-    # TODO (Практика 4): добавьте proprio_list, соберите массив (T,16)
-    # и передайте его в LeRobotWriter между state и action.
+def save_lerobot_episode(writer, obs_list, state_list, proprio_list, action_list):
     obs_arr = np.stack(obs_list).astype(np.uint8)
     state_arr = np.stack(state_list).astype(np.float32)
+    proprio_arr = np.stack(proprio_list).astype(np.float32)
     act_arr = np.stack(action_list).astype(np.float32)
-    writer.add_episode(obs_arr, state_arr, act_arr)
+    writer.add_episode(obs_arr, state_arr, proprio_arr, act_arr)
     print(f"Эпизод сохранён в LeRobotDataset ({len(action_list)} шагов)")
 
 
@@ -172,7 +171,7 @@ def run_teleop(env, save_dir, output_format):
 
                 obs_list = [obs]
                 state_list = [env.get_privileged_state()[:8].copy()]
-                # TODO (Практика 4): создайте синхронный proprio_list после reset.
+                proprio_list = [env.get_proprio()]
                 action_list = []
                 controller.save_requested = False
                 controller.cancel_requested = False
@@ -186,7 +185,7 @@ def run_teleop(env, save_dir, output_format):
                     obs, success, done = env.step(action)
                     obs_list.append(obs)
                     state_list.append(env.get_privileged_state()[:8].copy())
-                    # TODO (Практика 4): добавьте proprio после step в тот же момент.
+                    proprio_list.append(env.get_proprio())
 
                     mj_data.qpos[:] = env.data.qpos[:]
                     mj_data.qvel[:] = env.data.qvel[:]
@@ -201,7 +200,8 @@ def run_teleop(env, save_dir, output_format):
                             )
                         else:
                             save_lerobot_episode(
-                                writer, obs_list[:-1], state_list[:-1], action_list
+                                writer, obs_list[:-1], state_list[:-1],
+                                proprio_list[:-1], action_list
                             )
                         break
 
@@ -217,7 +217,8 @@ def run_teleop(env, save_dir, output_format):
                                 )
                             else:
                                 save_lerobot_episode(
-                                    writer, obs_list[:-1], state_list[:-1], action_list
+                                    writer, obs_list[:-1], state_list[:-1],
+                                    proprio_list[:-1], action_list
                                 )
                         else:
                             print("Таймаут. Попробуйте снова.")

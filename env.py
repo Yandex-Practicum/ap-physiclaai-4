@@ -109,20 +109,20 @@ class PandaPickCubeEnv:
         return self.renderer.render().copy()
 
     def get_proprio(self) -> np.ndarray:
-        """Вернуть доступную роботу проприоцепцию с формой (16,).
-
-        TODO (Практика 4, сбор мультимодальных наблюдений):
-          1) скопируйте позиции 7 суставов руки и 2 пальцев из data.qpos;
-          2) скопируйте скорости 7 суставов руки из data.qvel;
-          3) объедините их в порядке [joint_pos, joint_vel];
-          4) верните непрерывный массив np.float32 формы (PROPRIO_DIM,).
-
-        Координаты куба, цели и камеры сюда не входят: это privileged state,
-        недоступный BC-политике во время реального инференса.
-        """
-        raise NotImplementedError(
-            "Реализуйте get_proprio — 9 qpos + 7 qvel (Практика 4)."
+        """Вернуть доступную роботу проприоцепцию с формой (16,)."""
+        joint_pos = self.data.qpos[:NUM_ARM_JOINTS + NUM_FINGERS].copy()
+        joint_vel = self.data.qvel[:NUM_ARM_JOINTS].copy()
+        return np.ascontiguousarray(
+            np.concatenate([joint_pos, joint_vel]), dtype=np.float32
         )
+
+    @property
+    def proprio_dim(self) -> int:
+        return PROPRIO_DIM
+
+    @property
+    def proprio_dim(self) -> int:
+        return PROPRIO_DIM
 
     def get_privileged_state(self) -> np.ndarray:
         joint_pos = self.data.qpos[:NUM_ARM_JOINTS + NUM_FINGERS].copy()

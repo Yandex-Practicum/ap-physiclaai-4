@@ -8,6 +8,12 @@ import pytest
 from env import PandaPickCubeEnv
 
 
+def test_proprio_dim_matches_observation_contract():
+    env = PandaPickCubeEnv.__new__(PandaPickCubeEnv)
+
+    assert env.proprio_dim == 16
+
+
 def test_get_proprio_returns_joint_positions_and_velocities():
     env = PandaPickCubeEnv.__new__(PandaPickCubeEnv)
     env.data = SimpleNamespace(

@@ -6,19 +6,7 @@ import timm
 
 
 class BCPolicy(nn.Module):
-    """Мультимодальная BC-политика: image/proprio → вектор действия.
-
-    TODO (Практика 4):
-      - поддержите конфигурации image, both и proprio через флаги;
-      - создавайте CNN только при use_image;
-      - для proprio поддержите ablation ``mlp`` (16→64→64) и ``identity``
-        (нормализованный вектор без обучаемого энкодера);
-      - храните proprio mean/std через register_buffer;
-      - стройте decoder от суммы размеров включённых веток.
-
-    Для режима image сохраните имена модулей encoder/decoder и прежние размеры:
-    это позволяет загружать legacy checkpoint без поля obs_mode.
-    """
+    """Мультимодальная BC-политика: image/proprio → вектор действия."""
 
     def __init__(
         self,
@@ -39,27 +27,77 @@ class BCPolicy(nn.Module):
         self.use_image = use_image
         self.use_proprio = use_proprio
         self.proprio_encoder_type = proprio_encoder_type
-        raise NotImplementedError(
-            "Реализуйте условные image/proprio ветки BCPolicy (Практика 4)."
+
+        feature_dim = 0
+        if self.use_image:
+            self.encoder = timm.create_model(
+                encoder_name, pretrained=True, num_classes=0
+            )
+            feature_dim += self.encoder.num_features
+
+        if self.use_proprio:
+            if proprio_mean is None:
+                proprio_mean = torch.zeros(proprio_dim, dtype=torch.float32)
+            if proprio_std is None:
+                proprio_std = torch.ones(proprio_dim, dtype=torch.float32)
+            proprio_mean = torch.as_tensor(proprio_mean, dtype=torch.float32)
+            proprio_std = torch.as_tensor(proprio_std, dtype=torch.float32)
+            if proprio_mean.shape != (proprio_dim,) or proprio_std.shape != (proprio_dim,):
+                raise ValueError(
+                    f"proprio_mean и proprio_std должны иметь форму ({proprio_dim},)."
+                )
+            self.register_buffer("proprio_mean", proprio_mean.clone())
+            self.register_buffer("proprio_std", proprio_std.clone())
+
+            if proprio_encoder_type == "mlp":
+                self.proprio_encoder = nn.Sequential(
+                    nn.Linear(proprio_dim, 64),
+                    nn.ReLU(),
+                    nn.Linear(64, 64),
+                    nn.ReLU(),
+                )
+                feature_dim += 64
+            else:
+                self.proprio_encoder = nn.Identity()
+                feature_dim += proprio_dim
+
+        self.decoder = nn.Sequential(
+            nn.Linear(feature_dim, 256),
+            nn.ReLU(),
+            nn.Linear(256, 128),
+            nn.ReLU(),
+            nn.Linear(128, action_dim),
+            nn.Tanh(),
         )
 
     def forward(self, obs=None, proprio=None) -> torch.Tensor:
-        """Выполнить forward по включённым модальностям.
+        """Выполнить forward по включённым модальностям."""
+        features = []
+        if self.use_image:
+            if obs is None:
+                raise ValueError("Для image-ветки требуется obs.")
+            if obs.ndim != 4 or obs.shape[1] != 3:
+                raise ValueError("obs должен иметь форму (B, 3, H, W).")
+            features.append(self.encoder(obs))
 
-        Изображение из LeRobot уже имеет формат BCHW float32 [0,1].
+        if self.use_proprio:
+            if proprio is None:
+                raise ValueError("Для proprio-ветки требуется proprio.")
+            if proprio.ndim != 2 or proprio.shape[1] != self.proprio_mean.numel():
+                raise ValueError(
+                    "proprio должен иметь форму "
+                    f"(B, {self.proprio_mean.numel()})."
+                )
+            normalized = (proprio - self.proprio_mean) / (self.proprio_std + 1e-6)
+            features.append(self.proprio_encoder(normalized))
 
-        TODO (Практика 4):
-          1) для image-ветки проверьте BCHW-контракт и получите CNN-фичи;
-          2) для proprio-ветки проверьте форму (B,16) и нормализуйте значения
-             как (proprio - mean) / (std + 1e-6);
-          3) в ablation ``mlp`` примените MLP 16→64→64, а в ``identity``
-             передайте нормализованные 16 признаков напрямую;
-          4) объедините доступные фичи через torch.cat(..., dim=-1);
-          5) передайте результат в decoder.
-        """
-        raise NotImplementedError(
-            "Реализуйте мультимодальный forward BCPolicy (Практика 4)."
-        )
+        if len(features) > 1:
+            if features[0].shape[0] != features[1].shape[0]:
+                raise ValueError("Размер batch у image и proprio должен совпадать.")
+            fused = torch.cat(features, dim=-1)
+        else:
+            fused = features[0]
+        return self.decoder(fused)
 
 
 class RLPolicy(nn.Module):
