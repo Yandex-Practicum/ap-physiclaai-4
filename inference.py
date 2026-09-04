@@ -1,7 +1,8 @@
-"""Rollout-оценка BC-модели и RL-эксперта.
+"""Rollout-оценка BC-моделей и RL-эксперта.
 
 Запуск:
-    python3 inference.py --checkpoint logs/bc_baseline/checkpoints/best.pt --model bc --episodes 50 --seed 999
+    python3 inference.py --checkpoint logs/bc_1k/checkpoints/best.pt --model bc --episodes 50 --seed 999
+    python3 inference.py --checkpoint logs/bc_10k/checkpoints/best.pt --model bc --episodes 50 --seed 999
     python3 inference.py --checkpoint checkpoints/rl_expert.pt --model rl --episodes 50 --seed 999
 """
 
@@ -28,6 +29,18 @@ def parse_args():
 
 
 def load_bc_policy(checkpoint_path: str, device: str) -> BCPolicy:
+    """Восстановить BCPolicy той же модальности, что использовалась в train.
+
+    TODO (Практика 4):
+      1) прочитайте obs_mode из checkpoint; для старых checkpoint используйте
+         fallback "image";
+      2) создайте BCPolicy с соответствующими use_image/use_proprio;
+      3) восстановите proprio_encoder_type; для старых checkpoint используйте
+         fallback "mlp";
+      4) для proprio-режимов передайте временные mean=zeros(16), std=ones(16):
+         реальные buffers восстановятся из model_state_dict;
+      5) затем загрузите state_dict и переведите модель в eval.
+    """
     checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=True)
     policy = BCPolicy(action_dim=8)
     policy.load_state_dict(checkpoint["model_state_dict"])
@@ -51,17 +64,28 @@ def load_rl_policy(checkpoint_path: str, device: str) -> RLPolicy:
 
 
 def run_episode_bc(env, policy, device, seed):
-    obs = env.reset(seed=seed)
+    """Один эпизод closed-loop инференса мультимодальной BC-модели.
 
-    for step in range(env.episode_length):
-        obs_t = torch.from_numpy(obs).unsqueeze(0).to(device)
-        with torch.no_grad():
-            action = policy(obs_t).squeeze(0).cpu().numpy()
-        obs, success, done = env.step(action)
-        if done:
-            return success, step + 1
+    API среды этого проекта (не gym-стайл):
+      ``obs = env.reset(seed=seed)``            — кадр HWC uint8 [0,255];
+      ``obs, success, done = env.step(action)`` — три значения.
 
-    return False, env.episode_length
+    TODO (Практика 4): реализуйте цикл на ``range(env.episode_length)``:
+      1) если ``policy.use_image``, преобразуйте текущий HWC uint8 кадр
+         в BCHW float32 [0,1];
+      2) если ``policy.use_proprio``, вызовите ``env.get_proprio()`` для того же
+         текущего состояния и добавьте batch-размерность;
+      3) под ``torch.no_grad()`` вызовите ``policy(obs=..., proprio=...)``;
+      4) выполните ``env.step`` и завершите цикл при ``done``.
+
+    Не читайте LeRobot на инференсе: обе модальности приходят напрямую из env.
+    Кадр и proprio на каждом шаге должны быть синхронны.
+    Если эпизод не завершился за ``env.episode_length`` шагов — верните
+    ``(False, env.episode_length)``.
+    """
+    raise NotImplementedError(
+        "Реализуйте цикл closed-loop инференса BC-модели (см. Урок 6)."
+    )
 
 
 def run_episode_rl(env, policy, device, seed):
@@ -104,7 +128,8 @@ def main():
     for ep in range(args.episodes):
         ep_seed = rng.randint(0, 2**31)
         success, steps = run_fn(env, policy, device, ep_seed)
-        status = "success" if success else "fail"
+        diagnostic = env.get_rollout_diagnostic()
+        status = "success" if success else f"fail — {diagnostic}"
         successes += int(success)
         print(f"Episode {ep + 1}/{args.episodes}: {status} ({steps} steps)")
 
